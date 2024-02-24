@@ -1,4 +1,5 @@
 from aiogram import F, Router, types
+# from asyncio import sleep
 from aiogram.filters import CommandStart, Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -11,36 +12,38 @@ import re
 
 # from filters.chat_types import ChatTypeFilter, IsAdmin
 from kbds.reply import get_keyboard
-
+from file.engine import save_number, search_records, show_numbers
 
 user_FSM_router = Router()
 # user_FSM_router.message.filter(ChatTypeFilter(["private"]), IsAdmin())
 
-
+# Главное меню через функцию-конструктор(модуль kbd.reply)
 FSM_KB = get_keyboard(
     "Добавить номер",
     "Изменить номер",
     "Удалить номер",
-    "Отправить номер 📱",
+    "Посмотреть",
+    "Найти запись",
+    "Добавить свой номер 📱",
     "Отправить локацию 🗺️",
-    "Я просто посмотреть зашел",
+    
     placeholder="Выберите действие",
-    request_contact=3,
-    request_location=4,
-    sizes=(3, 2, 1),
+    request_contact=5,
+    request_location=6,
+    sizes=(3, 2, 2),
 )
 
 @user_FSM_router.message(CommandStart()) # Ловим хендлер /start
 async def abonent_features(message: types.Message):
     await message.answer("Что хотите сделать?", reply_markup=FSM_KB)
 
-
+# Перехватываем хэндлер для помощи в разных условиях
 @user_FSM_router.message(F.text.lower() == "помощь")
 @user_FSM_router.message(Command("help"))
 async def help_cmd(message: types.Message, state: FSMContext):
     text = as_list(
         as_marked_section(
-            Bold("Варианты обращения:"),
+            Bold("Варианты общения с ботом:"),
             "через команды /",
             "через меню",
             "через инлайн-кнопки",
@@ -58,34 +61,92 @@ async def help_cmd(message: types.Message, state: FSMContext):
 
     if current_state is None: # Если не в режиме FSM то этот вариант 
         await message.answer(text.as_html())
-        await message.answer("Чтобы начать нажмите /start")
+        await message.answer("<b>Чтобы начать нажмите /start</b>")
     else: # Иначе - другой
-        await message.answer("Чтобы отменить нажмите \"отмена\"\nЧтобы вернуться назад - \"назад\"")
+        await message.answer("Чтобы отменить нажмите <b>\"отмена\"</b>\nЧтобы вернуться назад - <b>\"назад\"</b>")
 
-@user_FSM_router.message(F.text == "Я просто посмотреть зашел")
+# Тут мы выводим записи на экран в виде карточек
+@user_FSM_router.message(F.text == "Посмотреть")
 async def starting_at_phonebook(message: types.Message):
-    await message.answer("ОК, вот список абонентов:")
+    await message.answer("<b><u>ОК, вот список абонентов:</u></b>")
+    data = await show_numbers('phonebook.txt')
+    for record in data:
+        message_text = f"<b>Фамилия:</b> {record['surname']}\n" \
+                        f"<b>Имя:</b> {record['firstname']}\n" \
+                        f"<b>Отчество:</b> {record['patronymic']}\n" \
+                        f"<b>Номер телефона:</b> {record['phonenumber']}\n" \
+                        f"<b>Описание:</b> {record['description']}"
+        await message.answer(message_text)
+        # await sleep(1)
 
 @user_FSM_router.message(F.text == "Изменить номер")
 async def change_number(message: types.Message):
     await message.answer("ОК, вот список номеров")
 
+# Удаление номера из списка
 @user_FSM_router.message(F.text == "Удалить номер")
 async def delete_number(message: types.Message):
     await message.answer("Выберите номер(а) для удаления")
 
+# Получаем из меню в хендлер свой контакт и сохраняем его в словарь
 @user_FSM_router.message(F.contact)
 async def get_contact(message: types.Message):
-    await message.answer(f"номер получен")
-    await message.answer(str(message.contact))
+    await message.answer(f"<b>номер получен</b>")
+    # await message.answer(str(message.contact)) # Выводим данные на экран(временно)
+    # Раскладываем полученный контакт на составляющие и кладем в словарь
+    contact = message.contact
+    phone_number = contact.phone_number
+    first_name = contact.first_name
+    last_name = contact.last_name
+    user_id = contact.user_id
+
+    new_contact = {
+        'surname': last_name or '',  # Если фамилия отсутствует, используем пустую строку
+        'firstname': first_name,
+        'patronymic': '',  # Надо подумать позже что с этим делать...
+        'phonenumber': phone_number,
+        'description': f'ID пользователя: {user_id}'
+    }
+    await save_number('phonebook.txt', new_contact) # Добавляем новую запись в на файл
 
 @user_FSM_router.message(F.location)
 async def get_location(message: types.Message):
     await message.answer(f"локация получена")
     await message.answer(str(message.location))
 
+class SearchState(StatesGroup):
+    searching = State()
 
-#Код ниже для машины состояний (FSM)
+# Поиск записи по вхождению
+@user_FSM_router.message(StateFilter(None), F.text == "Найти запись")
+async def search_number(message: types.Message, state: FSMContext):
+    await message.answer(
+        "Введите данные, которые вы хотите найти (ФИО, номер телефона):", 
+        reply_markup=types.ReplyKeyboardRemove()
+        )
+    await state.set_state(SearchState.searching)
+
+#Ловим данные для состояние searching
+@user_FSM_router.message(SearchState.searching, F.text)
+async def get_search(message: types.Message, state: FSMContext):
+
+    search_query = message.text # Получаем введенные данные и ищем записи в словаре
+    print(type(search_query))
+    search_results = await search_records('phonebook.txt', search_query)
+    
+    if search_results: # Выводим результаты
+        for record in search_results:
+            message_text = f"<b>Фамилия:</b> {record['surname']}\n" \
+                            f"<b>Имя:</b> {record['firstname']}\n" \
+                            f"<b>Отчество:</b> {record['patronymic']}\n" \
+                            f"<b>Номер телефона:</b> {record['phonenumber']}\n" \
+                            f"<b>Описание:</b> {record['description']}"
+        await message.answer(message_text, reply_markup=FSM_KB)
+    else:
+        await message.answer("Ничего не найдено.", reply_markup=FSM_KB)
+    await state.clear()
+
+#Код ниже для машины состояний (FSM) для добавления номера
 
 class AddPhonebook(StatesGroup):
     #Шаги состояний
@@ -102,6 +163,7 @@ class AddPhonebook(StatesGroup):
         'AddPhonebook:phonenumber': 'Введите номер заново:',
         'AddPhonebook:description': 'Этот стейт последний, поэтому...',
     }
+
 
 #Становимся в состояние ожидания самого первого ввода surname
 @user_FSM_router.message(StateFilter(None), F.text == "Добавить номер")
@@ -123,7 +185,7 @@ async def cancel_handler(message: types.Message, state: FSMContext) -> None:
         return
 
     await state.clear()
-    await message.answer("Действия отменены", reply_markup=FSM_KB)
+    await message.answer("<b>Действия отменены</b>", reply_markup=FSM_KB)
 
 #Вернутся на шаг назад (на прошлое состояние)
 @user_FSM_router.message(StateFilter('*'), Command("назад"))
@@ -225,11 +287,13 @@ async def add_phonenumber2(message: types.Message, state: FSMContext):
 @user_FSM_router.message(AddPhonebook.description, F.text)
 async def add_description(message: types.Message, state: FSMContext):
     await state.update_data(description=message.text)
-    await message.answer("Абонент добавлен", reply_markup=FSM_KB)
+    await message.answer("<b>Абонент добавлен</b>", reply_markup=FSM_KB)
     data = await state.get_data()
-    await message.answer(str(data)) # Тестовый вывод абонента
+    # await message.answer(str(data)) # Тестовый вывод абонента
+    await save_number('phonebook.txt', data)
     await state.clear()
 
+#Хендлер для отлова некорректных ввода для состояния descripton
 @user_FSM_router.message(AddPhonebook.description)
 async def add_description2(message: types.Message, state: FSMContext):
     await message.answer("Отправьте описание")
