@@ -2,9 +2,8 @@
 async def save_number(filename: str, data: dict):
     # Преобразование словаря в строку
     line = ','.join([str(value) for value in data.values()])
-
     # Запись строки в файл
-    async with open(filename, 'a+', encoding='utf-8') as file:
+    with open(filename, 'a+', encoding='utf-8') as file:
         file.write(line +'\n')
         # file.write(f'{s[:-1]}\n')
 
@@ -26,7 +25,7 @@ async def save_your_number(filename: str, contact):
 async def show_numbers(filename: str):
     pbook=[]
     fields=['surname', 'firstname', 'patronymic', 'phonenumber', 'description']
-    async with open(filename, 'r', encoding='utf-8') as file:
+    with open(filename, 'r', encoding='utf-8') as file:
         for line in file:
             n = line.split(',')
             if n != '': # Проверка на непустую строку
@@ -34,11 +33,10 @@ async def show_numbers(filename: str):
                 pbook.append(record)
     return pbook
 
-
 async def search_records(filename: str, search_query: str):
     pbook=[]
     fields=['surname', 'firstname', 'patronymic', 'phonenumber', 'description']
-    async with open(filename, 'r', encoding='utf-8') as file:
+    with open(filename, 'r', encoding='utf-8') as file:
         for line in file:
             n = line.split(',')
             if n != '': # Проверка на непустую строку
@@ -46,3 +44,34 @@ async def search_records(filename: str, search_query: str):
                     record = dict(zip(fields, n))
                     pbook.append(record)
     return pbook
+
+
+async def delete_record(filename: str, record: str):
+    with open(filename, 'r', encoding='utf-8') as file:
+        lines = file.readlines()
+    # Ищем индексы строк, которые содержат искомый элемент
+    indices_to_remove = [i for i, line in enumerate(lines) if record.lower().strip() in line.lower()]
+    # Удаляем найденные строки из списка
+    if indices_to_remove:
+        for index in reversed(indices_to_remove):
+            lines.pop(index)
+        # Перезаписываем файл без удаленных строк
+        with open(filename, 'w', encoding='utf-8') as file:
+            file.writelines(lines)
+            return True
+    else:
+        return False
+    
+async def copy_record(filename: str, filename2: str, record: str):
+    with open(filename, 'r', encoding='utf-8') as file:
+        lines = file.readlines()
+     # Ищем строки, содержащие искомое вхождение
+    matching_lines = [line for line in lines if record.lower() in line.lower()]
+
+    if matching_lines:
+        # Добавляем найденные строки в конец файла назначения
+        with open(filename2, 'w', encoding='utf-8') as destination_file:
+            destination_file.writelines(matching_lines)
+            return True
+    else:
+        return False

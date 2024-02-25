@@ -12,7 +12,8 @@ import re
 
 # from filters.chat_types import ChatTypeFilter, IsAdmin
 from kbds.reply import get_keyboard
-from file.engine import save_number, save_your_number, search_records, show_numbers
+from file.engine import copy_record, delete_record, save_number, save_your_number,\
+                        search_records, show_numbers
 
 user_FSM_router = Router()
 # user_FSM_router.message.filter(ChatTypeFilter(["private"]), IsAdmin())
@@ -20,7 +21,7 @@ user_FSM_router = Router()
 # Главное меню через функцию-конструктор(модуль kbd.reply)
 FSM_KB = get_keyboard(
     "Добавить номер",
-    "Изменить номер",
+    "Скопировать номер",
     "Удалить номер",
     "Посмотреть",
     "Найти запись",
@@ -79,14 +80,57 @@ async def starting_at_phonebook(message: types.Message):
         await message.answer(message_text)
         # await sleep(1)
 
-@user_FSM_router.message(F.text == "Изменить номер")
-async def change_number(message: types.Message):
-    await message.answer("ОК, вот список номеров")
+# Машина состояний для екоторых событий       
+class SearchState(StatesGroup):
+    searching = State()
+    deleting = State()
+    coping = State()
+
+# Копируем выбранные данные в другой файл
+@user_FSM_router.message(StateFilter(None), F.text == "Скопировать номер")
+async def change_number(message: types.Message, state: FSMContext):
+    await message.answer("Введите фамилию или №телефона для копирования в другой справочник", 
+                         reply_markup=types.ReplyKeyboardRemove())
+    await state.set_state(SearchState.coping)
+
+#Ловим данные для состояние coping
+@user_FSM_router.message(SearchState.coping, F.text)
+async def get_copy(message: types.Message, state: FSMContext):
+    copy_query = message.text
+    is_coping = await copy_record('phonebook.txt', 'pbook2.txt', copy_query)
+    if is_coping:
+        await message.reply("Запись скопирована", reply_markup=FSM_KB)
+    else:
+        await message.reply("Такой записи нет", reply_markup=FSM_KB)
+    await state.clear()
+
+#Хендлер для отлова некорректных вводов для состояния deleting
+@user_FSM_router.message(SearchState.coping)
+async def get_copy2(message: types.Message, state: FSMContext):
+    await message.answer("Вы ввели не допустимые данные, введите правильный текст")
 
 # Удаление номера из списка
-@user_FSM_router.message(F.text == "Удалить номер")
-async def delete_number(message: types.Message):
-    await message.answer("Выберите номер(а) для удаления")
+@user_FSM_router.message(StateFilter(None), F.text == "Удалить номер")
+async def delete_number(message: types.Message, state: FSMContext):
+    await message.answer("Введите фамилию или №телефона для удаления", 
+                         reply_markup=types.ReplyKeyboardRemove())
+    await state.set_state(SearchState.deleting)
+
+#Ловим данные для состояние deleting
+@user_FSM_router.message(SearchState.deleting, F.text)
+async def get_delete(message: types.Message, state: FSMContext):
+    delete_query = message.text
+    is_delete = await delete_record('phonebook.txt', delete_query)
+    if is_delete:
+        await message.reply("Запись удалена", reply_markup=FSM_KB)
+    else:
+        await message.reply("Такой записи нет", reply_markup=FSM_KB)
+    await state.clear()
+
+#Хендлер для отлова некорректных вводов для состояния deleting
+@user_FSM_router.message(SearchState.deleting)
+async def get_delete2(message: types.Message, state: FSMContext):
+    await message.answer("Вы ввели не допустимые данные, введите правильный текст")
 
 # Получаем из меню в хендлер свой контакт и сохраняем его в словарь
 @user_FSM_router.message(F.contact)
@@ -96,16 +140,14 @@ async def get_contact(message: types.Message):
     contact = message.contact
     await save_your_number('phonebook.txt', contact) # Передаем свой номер в список
 
-@user_FSM_router.message(F.location)
+@user_FSM_router.message(F.location) # Просто так, от нефиг делать
 async def get_location(message: types.Message):
     await message.answer(f"локация получена")
     await message.answer(str(message.location))
 
-class SearchState(StatesGroup):
-    searching = State()
 
 # Поиск записи по вхождению FSM
-@user_FSM_router.message(StateFilter(None), F.text == "Найти запись")#,flags=False)
+@user_FSM_router.message(StateFilter(None), F.text == "Найти запись")
 async def search_number(message: types.Message, state: FSMContext):
     await message.answer(
         "Введите данные, которые вы хотите найти (ФИО, номер телефона):", 
@@ -118,7 +160,6 @@ async def search_number(message: types.Message, state: FSMContext):
 async def get_search(message: types.Message, state: FSMContext):
 
     search_query = message.text # Получаем введенные данные и ищем записи в словаре
-    print(type(search_query))
     search_results = await search_records('phonebook.txt', search_query)
     
     if search_results: # Выводим результаты
